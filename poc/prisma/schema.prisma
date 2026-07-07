@@ -1,0 +1,108 @@
+// Prisma schema — 對齊 docs/02-er-diagram.md
+// SQLite 不支援 enum，狀態/型別以 String 儲存，合法值見 docs/03-state-machine.md 與註解。
+// 金額一律整數「分」（BR-6）。
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  // PoC 用 SQLite（零設定）。換 PostgreSQL 只需改 provider = "postgresql" 與 url。
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model Member {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  createdAt DateTime @default(now())
+  orders    Order[]
+}
+
+model Product {
+  id               String      @id @default(cuid())
+  name             String
+  priceCents       Int
+  stockQuantity    Int // 可售庫存
+  reservedQuantity Int         @default(0) // 已預扣未付款（BR-2）
+  createdAt        DateTime    @default(now())
+  orderItems       OrderItem[]
+}
+
+model Order {
+  id              String   @id @default(cuid())
+  memberId        String
+  status          String // PENDING_PAYMENT/PAID/SHIPPED/COMPLETED/CANCELLED/RETURNED
+  totalAmountCents Int
+  idempotencyKey  String?  @unique // 防重複建單（BR-4）
+  createdAt       DateTime @default(now())
+  paidAt          DateTime?
+  shippedAt       DateTime?
+  completedAt     DateTime?
+  cancelledAt     DateTime?
+
+  member        Member               @relation(fields: [memberId], references: [id])
+  items         OrderItem[]
+  payments      Payment[]
+  statusHistory OrderStatusHistory[]
+}
+
+model OrderItem {
+  id             String @id @default(cuid())
+  orderId        String
+  productId      String
+  quantity       Int
+  unitPriceCents Int // 價格快照（BR-1）
+  subtotalCents  Int
+
+  order   Order   @relation(fields: [orderId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  orderId       String
+  amountCents   Int
+  status        String // pending/succeeded/failed/refunded
+  method        String
+  transactionRef String?
+  createdAt     DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+model OrderStatusHistory {
+  id         String   @id @default(cuid())
+  orderId    String
+  fromStatus String? // 建單時為 null
+  toStatus   String
+  actor      String // customer/system/operator
+  note       String?
+  createdAt  DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+// 退貨模型在 spec 完整定義，PoC 未實作退貨端點，故此處預留 schema 但不使用。
+// 保留是為了讓 Prisma schema 與 ER Diagram 完整對齊（一致性鏈）。
+model ReturnRequest {
+  id                String   @id @default(cuid())
+  orderId           String
+  status            String // requested/approved/rejected/completed
+  refundAmountCents Int
+  reason            String?
+  createdAt         DateTime @default(now())
+  resolvedAt        DateTime?
+  items             ReturnItem[]
+}
+
+model ReturnItem {
+  id                  String @id @default(cuid())
+  returnRequestId     String
+  orderItemId         String
+  quantity            Int
+  refundSubtotalCents Int
+
+  returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id])
+}

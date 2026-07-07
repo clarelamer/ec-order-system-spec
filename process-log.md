@@ -5,6 +5,21 @@
 
 ---
 
+## 2026-07-07 — #003 PoC 實作與驗證（一致性鏈末端）
+
+**做了什麼**：實作可跑 PoC（Express＋Prisma＋SQLite＋Zod），三支端點（建單 T1／查詢／付款 T2），寫 smoke test 跑過 happy path 與 6 類邊界情況，19/19 通過。
+
+**一致性鏈落地**：程式的每個檔案都對應一份 spec——`schema.prisma`↔ER、`status.ts`↔狀態機轉移表、`schemas.ts`↔API request、`routes/orders.ts`↔API 端點。狀態機的合法轉移直接編碼在 `status.ts` 的 `ALLOWED_TRANSITIONS`，程式不允許繞過它改 status。
+
+**遇到的問題與修正循環**：
+
+1. **libuv assertion on teardown**（Windows）：smoke test 結尾出現 `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)`。19 項斷言已全過、只是收尾崩。原因是 `process.exit()` 與 http server handle 關閉的 race。**修正**：改成 `await new Promise(resolve => server.close(resolve))` 優雅關閉後，用 `process.exitCode` 取代 `process.exit()`，讓 node 自然退出。
+2. **多餘的 3000 埠 listener**：smoke test import `app` 時，`index.ts` 也自動 `listen(3000)`。原本用 `NODE_ENV !== "test"` 守衛不夠乾淨。**修正**：改用 `process.argv[1] === fileURLToPath(import.meta.url)` 判斷「是否為直接執行的主檔」，被 import 時不啟動 server。
+
+**驗證的關鍵行為**：庫存兩階段（建單 stock 10→8/reserved 0→2、付款後 reserved→0）、冪等重送不重複建單、庫存不足擋在交易內（防超賣）、非法狀態轉移回 409。
+
+**下一步**：寫專案 README，發布到獨立 GitHub repo（待 Lucia 審閱）。
+
 ## 2026-07-07 — #002 四份規格文件（一致性鏈上半）
 
 **做了什麼**：依序產出 `docs/01-requirements.md` → `02-er-diagram.md` → `03-state-machine.md` → `04-api-spec.md`。
